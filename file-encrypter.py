@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*-
 '''
 REQUIRES:
-- pip install pyAesCrypt
-- pip install cryptography
-- pip install joblib
-- pip install psutil
+- pip install pyAesCrypt   -stream file encryption
+- pip install cryptography -byte encryption
+- pip install joblib       -storing python objects
+- pip install psutil       -getting system RAM information
 '''
 import time
 import os
 import uuid
 import base64
-import joblib as joblib
+import joblib
 import threading
 import pyAesCrypt
 import multiprocessing
 import psutil
+import logging
+import argparse
 
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -28,10 +30,8 @@ from Crypto import Random
 # Module scope variables.
 #
 # ================================================================
+
 VERSION = '1.0.0'
-#FILE_LOC = 'E:/testtttt/testFolder'
-FILE_LOC = 'C:/temp/testFolder'
-PASSWORD = 'TEST123'
 
 # ================================================================
 #
@@ -99,6 +99,9 @@ def decrypt_bytes(key, source, decode=True):
 # Utilities
 #=================================================================
 
+#Functions
+#=============
+
 def _get_filename(filepath):
     return str(Path(filepath).name)
 
@@ -111,10 +114,12 @@ def _get_files_in_dir(potential_dir):
         fileList = os.listdir(potential_dir)
     return fileList
 
+#Classes
+#=============
+
 class _FileCreation:
     """
-    Keeps track of filenames to keep duplicates from
-    occuring. Exceedingly unlikely, but possible.
+    Keeps track of filenames to keep duplicates from occuring. 
     """
     def __init__(self):
         self._fileNames = set()
@@ -164,6 +169,49 @@ class _DataStore:
     def _write_store(self):
         joblib.dump(self._store, self._filepath)
 
+class _Metrics:
+    """
+    Manages metric information for the encryption process
+    """
+    def __init__(self):
+        self._startTime = None
+        self._filesProcessed = 0
+        self._totalDirectories = 0
+        self._totalFiles = 0
+        self._lock = threading.Lock()
+        self._timer = None
+    
+    def start(self):
+        self._startTime = time.time()
+    
+    # Metric calcs
+    #============================
+    
+    def process_filename(self, filename):
+        with self._lock:
+            if os.path.isdir(filename):
+                self._totalDirectories = self._totalDirectories + 1
+            else:
+                self._totalFiles = self._totalFiles + 1
+        logging.debug('Processed filename: ' + filename)
+    
+    def process_file(self, filename):
+        with self._lock:
+            self._filesProcessed = self._filesProcessed + 1
+        logging.debug('Processed file: ' + filename)
+        self.print_state()
+    
+    def check_state(self):
+        return  {
+                    'TIME_RUNNING (seconds)' : str(int(time.time() - self._startTime)),
+                    'FILES_PROCESSED' : self._filesProcessed,
+                    'TOTAL_FILES' : self._totalFiles,
+                    'PERCENT_COMPLETE' : int((self._filesProcessed / self._totalFiles) * 100) if self._totalFiles > 0 else 0
+                }
+
+    def print_state(self):
+        logging.info(str(self.check_state()))
+    
 # Runner
 #=================================================================
 
@@ -176,18 +224,20 @@ class _RecursiveFileEncryptor:
                   note: this can significantly slow down computer operations, so reduce threads if needed
     file_buffer_size - number of bytes to use (needs to be multiple of 16).
                   note: higher number here == more memory usage, but faster processing
+                  note: passing in less than 1 calculates a default value.
     """
     METADATA_FILE = '.encrypted_file_map'
     
-    def __init__(self, folder_location, password, max_threads=multiprocessing.cpu_count(), file_buffer_size=None):
-        self.folder_location = str(Path(folder_location))
-        self.password = password
-        self.file_buffer_size = file_buffer_size if file_buffer_size else self._calc_default_buffer(max_threads)
+    def __init__(self, folder_location, password, max_threads=multiprocessing.cpu_count(), file_buffer_size=0):
+        self.folder_location = str(Path(str(folder_location)))
+        self.password = str(password)
+        self.file_buffer_size = int(file_buffer_size) if int(file_buffer_size) > 0 else self._calc_default_buffer(int(max_threads))
         self.metadata_file_location = os.path.join(self.folder_location, _RecursiveFileEncryptor.METADATA_FILE)
         self.encrypt_files = not(os.path.exists(self.metadata_file_location))
-        self.thread_executor = ThreadPoolExecutor(max_workers=max_threads)
+        self.thread_executor = ThreadPoolExecutor(max_workers=int(max_threads))
         self.fileCreation = _FileCreation()
         self.datastore = _DataStore(self.metadata_file_location)
+        self._metrics = _Metrics()
         self.uuid_to_filename_dict = self._get_uuid_to_filename_dict(self.folder_location)
 
     # Managing functions
@@ -198,8 +248,9 @@ class _RecursiveFileEncryptor:
             self._process_folder()
     
     def _process_folder(self):
-        self._walk_encrypt_files(self.folder_location)
+        self._metrics.start()
         self._walk_encrypt_names(self.folder_location)
+        self._walk_encrypt_files(self.folder_location)
         self._save_uuid_to_filename_dict(self.folder_location)
         self.datastore.save_store(not(self.encrypt_files))
     
@@ -227,24 +278,28 @@ class _RecursiveFileEncryptor:
     def _process_file(self, file_input):
         tmpFilename = os.path.join(_get_parent(file_input), self.fileCreation.get_filename()) + '.tmp'
         if self.encrypt_files:
-            print('Encrypting: ' + file_input)
             encrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size)
         else:
-            print('Decrypting: ' + file_input)
-            decrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size)  
+            decrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size) 
+        self._metrics.process_file(file_input) 
 
     def _process_file_name(self, file_input):
+
+        input_name = _get_filename(file_input)
+        output_file_name = None
+
         if self.encrypt_files:
-            filename = _get_filename(file_input)
-            uuid_filename = self.fileCreation.get_filename()
-            self.uuid_to_filename_dict[uuid_filename] = encrypt_bytes(str.encode(self.password), str.encode(filename), False)
-            os.rename(file_input, os.path.join(_get_parent(file_input), uuid_filename))
+            output_file_name = self.fileCreation.get_filename()
+            self.uuid_to_filename_dict[output_file_name] = encrypt_bytes(str.encode(self.password), str.encode(input_name), False)
         else:
-            uuidName = _get_filename(file_input)
-            if uuidName in self.uuid_to_filename_dict:
-                uuid_filename = self.uuid_to_filename_dict[uuidName]
-                real_filename = decrypt_bytes(str.encode(self.password), uuid_filename, False).decode()
-                os.rename(file_input, os.path.join(_get_parent(file_input), real_filename))
+            if input_name in self.uuid_to_filename_dict:
+                uuid_filename = self.uuid_to_filename_dict[input_name]
+                output_file_name = decrypt_bytes(str.encode(self.password), uuid_filename, False).decode()
+
+        if output_file_name:
+            file_output = os.path.join(_get_parent(file_input), output_file_name)
+            os.rename(file_input, file_output)
+            self._metrics.process_filename(file_output)
     
     # File metadata saving
     #=================================================================
@@ -262,7 +317,7 @@ class _RecursiveFileEncryptor:
     # Utilities
     #=================================================================
 
-    def _calc_default_buffer(threadCount, memoryMultiplier = 0.75):
+    def _calc_default_buffer(self, threadCount, memoryMultiplier = 0.75):
         memory_bytes_per_thread = (psutil.virtual_memory().available * memoryMultiplier) // threadCount
         return int(memory_bytes_per_thread - (memory_bytes_per_thread % 16))
 
@@ -274,12 +329,32 @@ class _RecursiveFileEncryptor:
 
 def main():
     '''
-    main
+    Takes input for folder + password
+    Ex.  file-encrypter.py E:/testtttt/testFolder TEST123
     '''
-    start = time.time()
-    _RecursiveFileEncryptor(FILE_LOC, PASSWORD).run()
-    end = time.time()
-    print('Execution Time (seconds): ' + str(end - start))
+    parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
+
+    def _check_folder(folder):
+        if not(os.path.isdir(folder)):
+            raise argparse.ArgumentTypeError("%s is an invalid folder" % folder)
+        return folder
+
+    parser.add_argument("folder", type=_check_folder, 
+                        help="folder whose contents will be encrypted/decrypted")
+    
+    def _check_password(password):
+        if len(password) <= 0:
+            raise argparse.ArgumentTypeError("%s is an invalid password" % password)
+        return password
+
+    parser.add_argument("password", type=_check_password, 
+                        help="password which will be used for the encryption/decryption")
+
+    args = parser.parse_args()
+
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+
+    _RecursiveFileEncryptor(args.folder, args.password).run()
 
 
 if __name__ == '__main__':
