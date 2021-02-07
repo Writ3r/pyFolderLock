@@ -108,11 +108,12 @@ def _get_filename(filepath):
 def _get_parent(filepath):
     return str(Path(filepath).parent)
 
-def _get_files_in_dir(potential_dir):
-    fileList = []
-    if os.path.isdir(potential_dir):
-        fileList = os.listdir(potential_dir)
-    return fileList
+def _get_num_files_in_dir(filepath):
+    numFiles = 0
+    for root, subdirs, subfiles in os.walk(filepath):
+        for subfile in subfiles:
+            numFiles = numFiles + 1
+    return numFiles
 
 #Classes
 #=============
@@ -173,11 +174,10 @@ class _Metrics:
     """
     Manages metric information for the encryption process
     """
-    def __init__(self):
+    def __init__(self, folder):
         self._startTime = None
         self._filesProcessed = 0
-        self._totalDirectories = 0
-        self._totalFiles = 0
+        self._totalFiles = _get_num_files_in_dir(folder)
         self._lock = threading.Lock()
         self._timer = None
     
@@ -188,11 +188,6 @@ class _Metrics:
     #============================
     
     def process_filename(self, filename):
-        with self._lock:
-            if os.path.isdir(filename):
-                self._totalDirectories = self._totalDirectories + 1
-            else:
-                self._totalFiles = self._totalFiles + 1
         logging.debug('Processed filename: ' + filename)
     
     def process_file(self, filename):
@@ -237,7 +232,7 @@ class _RecursiveFileEncryptor:
         self.thread_executor = ThreadPoolExecutor(max_workers=int(max_threads))
         self.fileCreation = _FileCreation()
         self.datastore = _DataStore(self.metadata_file_location)
-        self._metrics = _Metrics()
+        self._metrics = _Metrics(self.folder_location)
         self.uuid_to_filename_dict = self._get_uuid_to_filename_dict(self.folder_location)
 
     # Managing functions
@@ -249,8 +244,8 @@ class _RecursiveFileEncryptor:
     
     def _process_folder(self):
         self._metrics.start()
-        self._walk_encrypt_names(self.folder_location)
         self._walk_encrypt_files(self.folder_location)
+        self._walk_encrypt_names(self.folder_location)
         self._save_uuid_to_filename_dict(self.folder_location)
         self.datastore.save_store(not(self.encrypt_files))
     
@@ -266,11 +261,12 @@ class _RecursiveFileEncryptor:
         wait(futures)
     
     def _walk_encrypt_names(self, filepath):
-        for file_input in _get_files_in_dir(filepath):
-            sub_filepath = os.path.join(filepath, file_input)
-            self._walk_encrypt_names(sub_filepath)
-            if _get_filename(sub_filepath) != _RecursiveFileEncryptor.METADATA_FILE:
-                self._process_file_name(sub_filepath)
+        if os.path.isdir(filepath):
+            for file_input in os.listdir(filepath):
+                sub_filepath = os.path.join(filepath, file_input)
+                self._walk_encrypt_names(sub_filepath)
+                if _get_filename(sub_filepath) != _RecursiveFileEncryptor.METADATA_FILE:
+                    self._process_file_name(sub_filepath)
     
     # Encrypt/Decrypt files and filenames
     #=================================================================
@@ -280,7 +276,8 @@ class _RecursiveFileEncryptor:
         if self.encrypt_files:
             encrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size)
         else:
-            decrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size) 
+            if _get_filename(file_input) in self.uuid_to_filename_dict:
+                decrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size) 
         self._metrics.process_file(file_input) 
 
     def _process_file_name(self, file_input):
@@ -330,17 +327,12 @@ class _RecursiveFileEncryptor:
 def main():
     '''
     Takes input for folder + password
-    Ex.  file-encrypter.py E:/testtttt/testFolder TEST123
+    Ex.  file-encrypter.py TEST123 E:/testtttt/testFolder "E:/testtttt/Everything Needed"
+    Ex.  file-encrypter.py TEST123 "E:/testtttt/Everything Needed"
+    - I still need to make this be able to take in a password file
+    - Switch to multiprocessing rather than threads for faster small files?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
-
-    def _check_folder(folder):
-        if not(os.path.isdir(folder)):
-            raise argparse.ArgumentTypeError("%s is an invalid folder" % folder)
-        return folder
-
-    parser.add_argument("folder", type=_check_folder, 
-                        help="folder whose contents will be encrypted/decrypted")
     
     def _check_password(password):
         if len(password) <= 0:
@@ -349,12 +341,25 @@ def main():
 
     parser.add_argument("password", type=_check_password, 
                         help="password which will be used for the encryption/decryption")
+    
+    def _check_folder(folder):
+        if not(os.path.isdir(folder)):
+            raise argparse.ArgumentTypeError("%s is an invalid folder" % folder)
+        return folder
+
+    parser.add_argument("folders", type=_check_folder, nargs="*",
+                        help="folder whose contents will be encrypted/decrypted")
 
     args = parser.parse_args()
 
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 
-    _RecursiveFileEncryptor(args.folder, args.password).run()
+    for folder in args.folders:
+        _RecursiveFileEncryptor(folder, args.password).run()
+
+    #print(args.folder)
+    #print(args.password)
+    #_RecursiveFileEncryptor(args.folder, args.password).run()
 
 
 if __name__ == '__main__':
