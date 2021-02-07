@@ -102,15 +102,6 @@ def decrypt_bytes(key, source, decode=True):
     return data[:-padding]  # remove the padding
 
 
-def _read_file(path):
-    with open(path, 'rb') as ifp:
-        return ifp.read()
-
-def _write_file(path, content):
-    with open(path, 'wb') as ofp:
-        ofp.write(content)
-
-
 # ================================================================
 #
 # Program specific parts.
@@ -122,6 +113,14 @@ def _write_file(path, content):
 
 #Functions
 #=============
+
+def _read_file(path):
+    with open(path, 'rb') as ifp:
+        return ifp.read()
+
+def _write_file(path, content):
+    with open(path, 'wb') as ofp:
+        ofp.write(content)
 
 def _get_filename(filepath):
     return str(Path(filepath).name)
