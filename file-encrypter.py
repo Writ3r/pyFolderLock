@@ -9,7 +9,6 @@ REQUIRES:
 '''
 import time
 import os
-import uuid
 import base64
 import joblib
 import threading
@@ -32,6 +31,10 @@ from Crypto import Random
 # ================================================================
 
 VERSION = '1.0.0'
+METHOD_BYTE_ENCRYPTION = 'BYTE_ENCRYPTION'
+METHOD_STREAM_ENCRYPTION = 'STREAM_ENCRYPTION'
+ENCRYPTED_EXT = '.locked'
+EXT_PATH = '\\\\?\\' if os.name == 'nt' else ''
 
 # ================================================================
 #
@@ -39,31 +42,39 @@ VERSION = '1.0.0'
 #
 # ================================================================
 
-def _calc_buffer_from_filesize(filename, buffer_size):
+def _determine_encrypt_method(filename, buffer_size):
     filesize_bytes = os.path.getsize(filename)
     if filesize_bytes < buffer_size:
-        buffer_size = filesize_bytes + (16 - (filesize_bytes % 16))
-    return buffer_size
+        return METHOD_BYTE_ENCRYPTION 
+    return METHOD_STREAM_ENCRYPTION
 
 def encrypt_file(filename, tmpFilename, password, buffer_size):
     """
-    Encrypts files via a stream using pyAesCrypt
+    Encrypts files via a stream or via content based on size
     """
-    buffer_size = _calc_buffer_from_filesize(filename,  buffer_size)
-    pyAesCrypt.encryptFile(filename, tmpFilename, password, buffer_size)
-    os.replace(tmpFilename, filename)
+    encryptMethod = _determine_encrypt_method(filename, buffer_size)
+    if encryptMethod == METHOD_STREAM_ENCRYPTION:
+        pyAesCrypt.encryptFile(filename, tmpFilename, password, buffer_size)
+        os.replace(tmpFilename, filename)
+    else:
+        output = encrypt_bytes(str.encode(password), _read_file(filename), encode=False)
+        _write_file(filename, output)
+    return encryptMethod
 
-def decrypt_file(filename, tmpFilename, password, buffer_size):
+def decrypt_file(filename, tmpFilename, password, buffer_size, encryption_type):
     """
-    Decrypts files via a stream using pyAesCrypt
+    Decrypts files via a stream or via content based on previous type
     """
-    buffer_size = _calc_buffer_from_filesize(filename,  buffer_size)
-    pyAesCrypt.decryptFile(filename, tmpFilename, password, buffer_size)
-    os.replace(tmpFilename, filename)
+    if encryption_type == METHOD_STREAM_ENCRYPTION:
+        pyAesCrypt.decryptFile(filename, tmpFilename, password, buffer_size)
+        os.replace(tmpFilename, filename)
+    else:
+        output = decrypt_bytes(str.encode(password), _read_file(filename), decode=False)
+        _write_file(filename, output)
 
 def encrypt_bytes(key, source, encode=True):
     """
-    Encrypts bytes (for things like filenames)
+    Encrypts bytes (used for things like strings/small files)
     https://stackoverflow.com/a/44212550/11381698
     """
     key = SHA256.new(key).digest()  # use SHA-256 over our key to get a proper-sized AES key
@@ -76,7 +87,7 @@ def encrypt_bytes(key, source, encode=True):
 
 def decrypt_bytes(key, source, decode=True):
     """
-    Decrypts bytes (for things like filenames)
+    Decrypts bytes (used for things like strings/small files)
     https://stackoverflow.com/a/44212550/11381698
     """
     if decode:
@@ -89,6 +100,16 @@ def decrypt_bytes(key, source, decode=True):
     if data[-padding:] != bytes([padding]) * padding:  # Python 2.x: chr(padding) * padding
         raise ValueError("Invalid padding...")
     return data[:-padding]  # remove the padding
+
+
+def _read_file(path):
+    with open(path, 'rb') as ifp:
+        return ifp.read()
+
+def _write_file(path, content):
+    with open(path, 'wb') as ofp:
+        ofp.write(content)
+
 
 # ================================================================
 #
@@ -123,36 +144,34 @@ class _FileCreation:
     Keeps track of filenames to keep duplicates from occuring. 
     """
     def __init__(self):
-        self._fileNames = set()
+        self._count = 0
         self._lock = threading.Lock()
 
     def get_filename(self):
         with self._lock:
-            uuid_filename = str(uuid.uuid4())
-            while uuid_filename in self._fileNames:
-                uuid_filename = str(uuid.uuid4())
-            self._fileNames.add(uuid_filename)
-            return uuid_filename
+            self._count = self._count + 1
+            return str(self._count)
 
 class _DataStore:
     """
     Stores data about the encryption inside a metadata file
     """
     UUID_TO_FILENAME_KEY = "UUID_TO_FILENAME"
+    FILENAME_TO_ENCRYPTION_TYPE_KEY = "FILENAME_TO_ENCRYPTION_TYPE"
+    PASSWORD_VERIFIER_KEY = "PASSWORD_VERIFIER"
 
     def __init__(self, filepath):
         self._filepath = filepath
         self._lock = threading.Lock()
         self._store = self._load_store()
-        
-    def get_data(self, key):
+    
+    def build_store(self, key, empty_collection):
         with self._lock:
             if key in self._store:
                 return self._store[key]
-
-    def store_data(self, key, data):
-        with self._lock:
-            self._store[key] = data
+            else:
+                self._store[key] = empty_collection
+                return self._store[key]
     
     def save_store(self, delete = False):
         with self._lock:
@@ -224,7 +243,7 @@ class _RecursiveFileEncryptor:
     METADATA_FILE = '.encrypted_file_map'
     
     def __init__(self, folder_location, password, max_threads=multiprocessing.cpu_count(), file_buffer_size=0):
-        self.folder_location = str(Path(str(folder_location)))
+        self.folder_location = EXT_PATH + str(Path(str(folder_location)))
         self.password = str(password)
         self.file_buffer_size = int(file_buffer_size) if int(file_buffer_size) > 0 else self._calc_default_buffer(int(max_threads))
         self.metadata_file_location = os.path.join(self.folder_location, _RecursiveFileEncryptor.METADATA_FILE)
@@ -233,7 +252,8 @@ class _RecursiveFileEncryptor:
         self.fileCreation = _FileCreation()
         self.datastore = _DataStore(self.metadata_file_location)
         self._metrics = _Metrics(self.folder_location)
-        self.uuid_to_filename_dict = self._get_uuid_to_filename_dict(self.folder_location)
+        self.uuid_to_filename_dict = self.datastore.build_store(_DataStore.UUID_TO_FILENAME_KEY, {})
+        self.filename_to_encryptionType_dict = self.datastore.build_store(_DataStore.FILENAME_TO_ENCRYPTION_TYPE_KEY, {})
 
     # Managing functions
     #=================================================================
@@ -244,9 +264,12 @@ class _RecursiveFileEncryptor:
     
     def _process_folder(self):
         self._metrics.start()
-        self._walk_encrypt_files(self.folder_location)
-        self._walk_encrypt_names(self.folder_location)
-        self._save_uuid_to_filename_dict(self.folder_location)
+        if self.encrypt_files:
+            self._walk_encrypt_files(self.folder_location)
+            self._walk_encrypt_names(self.folder_location)
+        else:
+            self._walk_encrypt_names(self.folder_location)
+            self._walk_encrypt_files(self.folder_location)
         self.datastore.save_store(not(self.encrypt_files))
     
     # Recursively walk directories
@@ -263,10 +286,9 @@ class _RecursiveFileEncryptor:
     def _walk_encrypt_names(self, filepath):
         if os.path.isdir(filepath):
             for file_input in os.listdir(filepath):
-                sub_filepath = os.path.join(filepath, file_input)
-                self._walk_encrypt_names(sub_filepath)
-                if _get_filename(sub_filepath) != _RecursiveFileEncryptor.METADATA_FILE:
-                    self._process_file_name(sub_filepath)
+                self._walk_encrypt_names(os.path.join(filepath, file_input))
+        if _get_filename(filepath) != _RecursiveFileEncryptor.METADATA_FILE and filepath != self.folder_location:
+            self._process_file_name(filepath)
     
     # Encrypt/Decrypt files and filenames
     #=================================================================
@@ -274,42 +296,26 @@ class _RecursiveFileEncryptor:
     def _process_file(self, file_input):
         tmpFilename = os.path.join(_get_parent(file_input), self.fileCreation.get_filename()) + '.tmp'
         if self.encrypt_files:
-            encrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size)
+            self.filename_to_encryptionType_dict[file_input] = encrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size)
         else:
-            if _get_filename(file_input) in self.uuid_to_filename_dict:
-                decrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size) 
+            if file_input.rsplit('.')[1] == ENCRYPTED_EXT:
+                decrypt_file(file_input, tmpFilename, self.password, self.file_buffer_size, self.filename_to_encryptionType_dict[file_input]) 
         self._metrics.process_file(file_input) 
 
     def _process_file_name(self, file_input):
-
         input_name = _get_filename(file_input)
         output_file_name = None
-
         if self.encrypt_files:
-            output_file_name = self.fileCreation.get_filename()
+            output_file_name = self.fileCreation.get_filename() + ENCRYPTED_EXT
             self.uuid_to_filename_dict[output_file_name] = encrypt_bytes(str.encode(self.password), str.encode(input_name), False)
         else:
             if input_name in self.uuid_to_filename_dict:
                 uuid_filename = self.uuid_to_filename_dict[input_name]
                 output_file_name = decrypt_bytes(str.encode(self.password), uuid_filename, False).decode()
-
         if output_file_name:
             file_output = os.path.join(_get_parent(file_input), output_file_name)
             os.rename(file_input, file_output)
             self._metrics.process_filename(file_output)
-    
-    # File metadata saving
-    #=================================================================
-
-    def _get_uuid_to_filename_dict(self, filepath):
-        if self.encrypt_files:
-            return {}
-        else:
-            return self.datastore.get_data(_DataStore.UUID_TO_FILENAME_KEY)
-
-    def _save_uuid_to_filename_dict(self, filepath):
-        if self.encrypt_files:
-            self.datastore.store_data(_DataStore.UUID_TO_FILENAME_KEY, self.uuid_to_filename_dict)
     
     # Utilities
     #=================================================================
@@ -330,7 +336,6 @@ def main():
     Ex.  file-encrypter.py TEST123 E:/testtttt/testFolder "E:/testtttt/Everything Needed"
     Ex.  file-encrypter.py TEST123 "E:/testtttt/Everything Needed"
     - I still need to make this be able to take in a password file
-    - Switch to multiprocessing rather than threads for faster small files?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
     
@@ -352,14 +357,10 @@ def main():
 
     args = parser.parse_args()
 
-    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
     for folder in args.folders:
-        _RecursiveFileEncryptor(folder, args.password).run()
-
-    #print(args.folder)
-    #print(args.password)
-    #_RecursiveFileEncryptor(args.folder, args.password).run()
+        _RecursiveFileEncryptor(os.path.abspath(folder), args.password).run()
 
 
 if __name__ == '__main__':
