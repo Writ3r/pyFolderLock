@@ -53,10 +53,9 @@ def main():
     Ex.  pyLockRun.py TEST123 "E:/testtttt/Everything Needed"
     Ex.  pyLockRun.py --pwdfile E:/testtttt/pwd.txt E:/testtttt/testFolder
     Things to do:
-        - add automated unit testing
+        - add a bit more unit testing?
         - handle single file case?
         - better errors handling?
-        - make encryption store extend data store?
         - implement pyinstaller?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')

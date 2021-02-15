@@ -1,12 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-'''
-REQUIRES:
-- pip install pyAesCrypt   -stream file encryption
-- pip install cryptography -byte encryption
-- pip install joblib       -storing python objects
-- pip install psutil       -getting system RAM information
-'''
 import time
 import os
 import base64

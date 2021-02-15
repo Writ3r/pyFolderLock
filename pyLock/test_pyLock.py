@@ -36,7 +36,7 @@ def _get_parent(filepath):
 # =================================================================
 
 
-class TestStringMethods(unittest.TestCase):
+class TestPyLock(unittest.TestCase):
     WORKING_DIR = _get_parent(inspect.getfile(inspect.currentframe()))
     TEST_DIR = os.path.join(WORKING_DIR, 'TEST_DATA')
     TEST_FOLDER_LIST = [
@@ -60,116 +60,116 @@ class TestStringMethods(unittest.TestCase):
         # destroy any possible files
         self.tearDown()
         # create basic test folder
-        os.mkdir(TestStringMethods.TEST_DIR)
-        for folder in TestStringMethods.TEST_FOLDER_LIST:
+        os.mkdir(TestPyLock.TEST_DIR)
+        for folder in TestPyLock.TEST_FOLDER_LIST:
             os.mkdir(folder)
-            for key in TestStringMethods.TEST_FILE_MAP:
+            for key in TestPyLock.TEST_FILE_MAP:
                 _write_file(os.path.join(folder, key),
-                            TestStringMethods.TEST_FILE_MAP[key],
+                            TestPyLock.TEST_FILE_MAP[key],
                             "w")
 
     def tearDown(self):
-        if os.path.exists(TestStringMethods.TEST_DIR):
-            shutil.rmtree(TestStringMethods.TEST_DIR)
-        if os.path.exists(TestStringMethods.PASSWORD_FILE):
-            os.remove(TestStringMethods.PASSWORD_FILE)
+        if os.path.exists(TestPyLock.TEST_DIR):
+            shutil.rmtree(TestPyLock.TEST_DIR)
+        if os.path.exists(TestPyLock.PASSWORD_FILE):
+            os.remove(TestPyLock.PASSWORD_FILE)
 
     def test_00_encrypt_byte_basic(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR, "PASSWORD111").run()
+        FolderEncryptor(TestPyLock.TEST_DIR, "PASSWORD111").run()
         # check that all files/dirs are diff
         self.check_dirs_not_normal()
 
     def test_01_decrypt_byte_basic(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR, "PASSWORD111").run()
+        FolderEncryptor(TestPyLock.TEST_DIR, "PASSWORD111").run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR, "PASSWORD111").run()
+        FolderEncryptor(TestPyLock.TEST_DIR, "PASSWORD111").run()
         # check that all files/dirs are back to normal
         self.check_dirs_normal()
 
     def test_02_pwdFile(self):
         # write password file
-        _write_file(TestStringMethods.PASSWORD_FILE, 'I AM A PASSWORD', "w")
+        _write_file(TestPyLock.PASSWORD_FILE, 'I AM A PASSWORD', "w")
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
-                        TestStringMethods.PASSWORD_FILE,
+        FolderEncryptor(TestPyLock.TEST_DIR,
+                        TestPyLock.PASSWORD_FILE,
                         passwordFile=True).run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         'I AM A PASSWORD').run()
         self.check_dirs_normal()
 
     def test_03_decrypt_pwdVerify(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR, 
+        FolderEncryptor(TestPyLock.TEST_DIR, 
                         "PASSWORD1113",
                         verifyPassword=True).run()
         # decrypt
         self.assertRaises(InvalidPasswordError,
                           FolderEncryptor,
-                          TestStringMethods.TEST_DIR,
+                          TestPyLock.TEST_DIR,
                           "PASSWORD111",
                           verifyPassword=True)
 
     def test_04_metricsEnabled(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         metricsEnabled=False).run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         metricsEnabled=True).run()
         self.check_dirs_normal()
 
     def test_05_maxThreads(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=4).run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=1).run()
         self.check_dirs_normal()
 
     def test_06_memory(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         memory=4000).run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=5000).run()
         self.check_dirs_normal()
 
     def test_07_memoryMultiplier(self):
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         memoryMultiplier=0.4).run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         memoryMultiplier=0.5).run()
         self.check_dirs_normal()
 
     def test_08_stream_encryption(self):
-        largeFile = os.path.join(TestStringMethods.TEST_DIR, 'LARGE_TEST.txt')
+        largeFile = os.path.join(TestPyLock.TEST_DIR, 'LARGE_TEST.txt')
         # make large file
         f = open(largeFile, "wb")
         f.seek(1073741824-1)
         f.write(b"\0")
         f.close()
         # encrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=1,
                         memory=836870912).run()
         # decrypt
-        FolderEncryptor(TestStringMethods.TEST_DIR,
+        FolderEncryptor(TestPyLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=1,
                         memory=836870912).run()
@@ -177,7 +177,7 @@ class TestStringMethods(unittest.TestCase):
 
     def check_dirs_normal(self):
         # check that all files/dirs are back to normal
-        for root, dirs, files in os.walk(TestStringMethods.TEST_DIR):
+        for root, dirs, files in os.walk(TestPyLock.TEST_DIR):
             for folder in dirs:
                 self.assertTrue('TEST' in folder)
             for filee in files:
@@ -185,7 +185,7 @@ class TestStringMethods(unittest.TestCase):
                 self.assertTrue('I AM' in _read_file(os.path.join(root, filee), "r+"))
 
     def check_dirs_not_normal(self):
-        for root, dirs, files in os.walk(TestStringMethods.TEST_DIR):
+        for root, dirs, files in os.walk(TestPyLock.TEST_DIR):
             for folder in dirs:
                 self.assertFalse('TEST' in folder)
             for filee in files:
@@ -194,6 +194,7 @@ class TestStringMethods(unittest.TestCase):
                     self.assertFalse('I AM' in _read_file(os.path.join(root, filee), "r+"))
                 except Exception:
                     pass
+
 
 if __name__ == '__main__':
     unittest.main()
