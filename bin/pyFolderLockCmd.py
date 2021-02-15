@@ -7,7 +7,7 @@ import argparse
 import multiprocessing
 
 from pathlib import Path
-from pyFolderLock import FolderEncryptor, InvalidPasswordError
+from pyFolderLock import FolderEncryptor, InvalidPasswordError, InvalidArgumentError
 
 # ================================================================
 #
@@ -53,9 +53,7 @@ def main():
     Ex.  pyLockRun.py TEST123 "E:/testtttt/Everything Needed"
     Ex.  pyLockRun.py --pwdfile E:/testtttt/pwd.txt E:/testtttt/testFolder
     Things to do:
-        - add a bit more unit testing?
         - handle single file case?
-        - better errors handling?
         - implement pyinstaller?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
@@ -138,7 +136,9 @@ def main():
                                               metricsEnabled=not(args.disableMetrics))
             folderEncrypter.run()
         except InvalidPasswordError:
-            print("The password you entered is invalid for: " + folder)
+            logging.error("The password you entered is invalid for: " + folder)
+        except InvalidArgumentError as e:
+            logging.error(str(e.msg))
 
 
 if __name__ == '__main__':

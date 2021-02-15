@@ -169,7 +169,8 @@ class InvalidArgumentError(Exception):
     def __init__(self, arg, reason):
         self.arg = arg
         self.reason = reason
-        super().__init__("Argument [{0}]is invalid because [{1}]".format(self.arg, self.reason))
+        self.msg = "Argument [{0}] is invalid because [{1}]".format(self.arg, self.reason)
+        super().__init__(self.msg)
 
 
 class _RepeatedTimer:
@@ -413,7 +414,7 @@ class FolderEncryptor:
 
         # dependent vars
         self._uuidToFilenameDict = self._datasource.get_value(_DataStore.UUID_TO_FILENAME_KEY)
-        self._filenameToEncTypeDict = self._datasource.get_value(_DataStore.FNAME_TO_ENC_TYPE_KEY)
+        self._fileToEncTypeDict = self._datasource.get_value(_DataStore.FNAME_TO_ENC_TYPE_KEY)
         self._fileBufferSize = self._calc_default_buffer(maxThreads,
                                                          memory,
                                                          memoryMultiplier=memoryMultiplier)
@@ -470,21 +471,24 @@ class FolderEncryptor:
     # =================================================================
 
     def _process_file(self, fileInput):
-        tmpFilename = os.path.join(_get_parent(fileInput),
-                                   self._fileCreation.get_filename()) + '.tmp'
-        if self._encryptFiles:
-            self._process_encrypt_file(fileInput, tmpFilename)
-        else:
-            self._process_decrypt_file(fileInput, tmpFilename)
-        self._metrics.process_file(fileInput)
+        try:
+            tmpFilename = os.path.join(_get_parent(fileInput),
+                                       self._fileCreation.get_filename()) + '.tmp'
+            if self._encryptFiles:
+                self._process_encrypt_file(fileInput, tmpFilename)
+            else:
+                self._process_decrypt_file(fileInput, tmpFilename)
+            self._metrics.process_file(fileInput)
+        except Exception:
+            logging.error('Failed to process file: ' + fileInput)
 
     def _process_encrypt_file(self, fileInput, tmpFilename):
         fileInputEnc = fileInput + ENCRYPTED_EXT
         os.rename(fileInput, fileInputEnc)
-        self._filenameToEncTypeDict[fileInputEnc] = encrypt_file(fileInputEnc,
-                                                                 tmpFilename,
-                                                                 self._password,
-                                                                 self._fileBufferSize)
+        self._fileToEncTypeDict[fileInputEnc] = encrypt_file(fileInputEnc,
+                                                             tmpFilename,
+                                                             self._password,
+                                                             self._fileBufferSize)
 
     def _process_decrypt_file(self, fileInput, tmpFilename):
         if fileInput[-len(ENCRYPTED_EXT):] == ENCRYPTED_EXT:
@@ -492,23 +496,26 @@ class FolderEncryptor:
                          tmpFilename,
                          self._password,
                          self._fileBufferSize,
-                         self._filenameToEncTypeDict[fileInput])
+                         self._fileToEncTypeDict[fileInput])
             os.rename(fileInput, fileInput[:-len(ENCRYPTED_EXT)])
 
     # Encrypt/Decrypt filenames
     # =================================================================
 
     def _process_file_name(self, fileInput):
-        inputName = _get_filename(fileInput)
-        outputName = None
-        if self._encryptFiles:
-            outputName = self._process_encrypt_filename(fileInput, inputName)
-        else:
-            outputName = self._process_decrypt_filename(fileInput, inputName)
-        if outputName:
-            fileOutput = os.path.join(_get_parent(fileInput), outputName)
-            os.rename(fileInput, fileOutput)
-            self._metrics.process_filename(fileOutput)
+        try:
+            inputName = _get_filename(fileInput)
+            outputName = None
+            if self._encryptFiles:
+                outputName = self._process_encrypt_filename(fileInput, inputName)
+            else:
+                outputName = self._process_decrypt_filename(fileInput, inputName)
+            if outputName:
+                fileOutput = os.path.join(_get_parent(fileInput), outputName)
+                os.rename(fileInput, fileOutput)
+                self._metrics.process_filename(fileOutput)
+        except Exception:
+            logging.error('Failed to process filename: ' + fileInput)
 
     def _process_encrypt_filename(self, fileInput, inputName):
         outputName = self._fileCreation.get_filename()

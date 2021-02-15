@@ -6,7 +6,6 @@ import inspect
 import shutil
 
 from pathlib import Path
-
 from pyFolderLock import FolderEncryptor, InvalidPasswordError, InvalidArgumentError
 
 
@@ -98,7 +97,14 @@ class TestPyFolderLock(unittest.TestCase):
         # decrypt
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         'I AM A PASSWORD').run()
+        # check normal
         self.check_dirs_normal()
+        # check invalid arg
+        self.assertRaises(InvalidArgumentError,
+                          FolderEncryptor,
+                          TestPyFolderLock.TEST_DIR,
+                          TestPyFolderLock.PASSWORD_FILE + '.invalid',
+                          passwordFile=True)
 
     def test_03_decrypt_pwdVerify(self):
         # encrypt
@@ -111,6 +117,12 @@ class TestPyFolderLock(unittest.TestCase):
                           TestPyFolderLock.TEST_DIR,
                           "PASSWORD111",
                           verifyPassword=True)
+        # check invalid arg
+        self.assertRaises(InvalidArgumentError,
+                          FolderEncryptor,
+                          TestPyFolderLock.TEST_DIR,
+                          "PASSWORD111",
+                          verifyPassword=10)
 
     def test_04_metricsEnabled(self):
         # encrypt
@@ -121,7 +133,14 @@ class TestPyFolderLock(unittest.TestCase):
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
                         metricsEnabled=True).run()
+        # check normal
         self.check_dirs_normal()
+        # check invalid arg
+        self.assertRaises(InvalidArgumentError,
+                          FolderEncryptor,
+                          TestPyFolderLock.TEST_DIR,
+                          "PASSWORD111",
+                          metricsEnabled=10)
 
     def test_05_maxThreads(self):
         # encrypt
@@ -132,7 +151,14 @@ class TestPyFolderLock(unittest.TestCase):
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=1).run()
+        # check normal
         self.check_dirs_normal()
+        # check invalid arg
+        self.assertRaises(InvalidArgumentError,
+                          FolderEncryptor,
+                          TestPyFolderLock.TEST_DIR,
+                          "PASSWORD111",
+                          maxThreads="a")
 
     def test_06_memory(self):
         # encrypt
@@ -142,8 +168,15 @@ class TestPyFolderLock(unittest.TestCase):
         # decrypt
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
-                        maxThreads=5000).run()
+                        memory=5000).run()
+        # check normal
         self.check_dirs_normal()
+        # check invalid arg
+        self.assertRaises(InvalidArgumentError,
+                          FolderEncryptor,
+                          TestPyFolderLock.TEST_DIR,
+                          "PASSWORD111",
+                          memory="a")
 
     def test_07_memoryMultiplier(self):
         # encrypt
@@ -154,25 +187,33 @@ class TestPyFolderLock(unittest.TestCase):
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
                         memoryMultiplier=0.5).run()
+        # check normal
         self.check_dirs_normal()
+        # check invalid arg
+        self.assertRaises(InvalidArgumentError,
+                          FolderEncryptor,
+                          TestPyFolderLock.TEST_DIR,
+                          "PASSWORD111",
+                          memoryMultiplier="a")
 
     def test_08_stream_encryption(self):
         largeFile = os.path.join(TestPyFolderLock.TEST_DIR, 'LARGE_TEST.txt')
         # make large file
         f = open(largeFile, "wb")
-        f.seek(1073741824-1)
+        f.seek(536870912-1)
         f.write(b"\0")
         f.close()
         # encrypt
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=1,
-                        memory=836870912).run()
+                        memory=268435456).run()
         # decrypt
         FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
                         maxThreads=1,
-                        memory=836870912).run()
+                        memory=268435456).run()
+        # check normal
         self.assertTrue(os.path.exists(largeFile))
 
     def check_dirs_normal(self):
