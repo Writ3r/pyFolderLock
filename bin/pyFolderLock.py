@@ -7,7 +7,7 @@ import argparse
 import multiprocessing
 
 from pathlib import Path
-from pyLock import FolderEncryptor, InvalidPasswordError
+from pyFolderLock import FolderEncryptor, InvalidPasswordError
 
 # ================================================================
 #
