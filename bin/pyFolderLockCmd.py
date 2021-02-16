@@ -54,7 +54,6 @@ def main():
     Ex.  pyFolderLockCmd.py --pwdfile E:/testtttt/pwd.txt E:/testtttt/testFolder
     Things to do:
         - handle single file case?
-        - test multi file case
         - implement pyinstaller?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
