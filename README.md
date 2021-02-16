@@ -7,4 +7,4 @@ Recursively encrypts files in folders. Useful for keeping vital information safe
 
 ## Ways to use
 - import pyFolderLock's FolderEncryptor, build the object, and run it.
-- call [project cmd interface file](https://github.com/Writ3r/pyFolderLock/blob/main/bin/pyFolderLockCmd.py) with stated args
+- call the [project cmd interface file](https://github.com/Writ3r/pyFolderLock/blob/main/bin/pyFolderLockCmd.py) with stated args
