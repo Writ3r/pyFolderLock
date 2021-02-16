@@ -6,7 +6,7 @@ Wrote all the code on windows, but the code should be OS independent. Let me kno
 
 ## Installation
 1. Make sure your environment has the necessary pip installs inside requirements.txt
-2. Add [project folder](https://github.com/Writ3r/pyFolderLock/tree/main/pyFolderLock) to your PYTHON_PATH
+2. Add [project folder](https://github.com/Writ3r/pyFolderLock/tree/main/pyFolderLock) to your PYTHONPATH
 
 ## Ways to use
 - import pyFolderLock's FolderEncryptor, build the object, and run it.
