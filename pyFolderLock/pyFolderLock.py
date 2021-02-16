@@ -136,14 +136,6 @@ def _get_parent(filepath):
     return str(Path(filepath).parent)
 
 
-def _get_num_files_in_dir(filepath):
-    numFiles = numDirs = 0
-    for ternary in os.walk(filepath):
-        numFiles += len(ternary[2])
-        numDirs += len(ternary[1])
-    return numFiles, numDirs
-
-
 def _get_curr_names(filepath):
     filenames = []
     dirnames = []
@@ -154,6 +146,9 @@ def _get_curr_names(filepath):
             filenames.append(filename)
     return dirnames, filenames
 
+
+def _is_non_empty_file(fpath):
+    return os.path.isfile(fpath) and os.path.getsize(fpath) > 0
 
 # Classes
 # =============
@@ -463,22 +458,21 @@ class FolderEncryptor:
         if os.path.isdir(filepath):
             for fileInput in os.listdir(filepath):
                 self._walk_encrypt_names(os.path.join(filepath, fileInput))
-        if (_get_filename(filepath) != FolderEncryptor.METADATA_FILE
-                and filepath != self._folderLocation):
-            self._process_file_name(filepath)
+        self._process_file_name(filepath)
 
     # Encrypt/Decrypt files
     # =================================================================
 
     def _process_file(self, fileInput):
         try:
-            tmpFilename = os.path.join(_get_parent(fileInput),
-                                       self._fileCreation.get_filename()) + '.tmp'
-            if self._encryptFiles:
-                self._process_encrypt_file(fileInput, tmpFilename)
-            else:
-                self._process_decrypt_file(fileInput, tmpFilename)
-            self._metrics.process_file(fileInput)
+            if _is_non_empty_file(fileInput) and os.access(fileInput, os.W_OK):
+                tmpFilename = os.path.join(_get_parent(fileInput),
+                                           self._fileCreation.get_filename()) + '.tmp'
+                if self._encryptFiles:
+                    self._process_encrypt_file(fileInput, tmpFilename)
+                else:
+                    self._process_decrypt_file(fileInput, tmpFilename)
+                self._metrics.process_file(fileInput)
         except Exception:
             logging.error('Failed to process file: ' + fileInput)
 
@@ -504,16 +498,18 @@ class FolderEncryptor:
 
     def _process_file_name(self, fileInput):
         try:
-            inputName = _get_filename(fileInput)
-            outputName = None
-            if self._encryptFiles:
-                outputName = self._process_encrypt_filename(fileInput, inputName)
-            else:
-                outputName = self._process_decrypt_filename(fileInput, inputName)
-            if outputName:
-                fileOutput = os.path.join(_get_parent(fileInput), outputName)
-                os.rename(fileInput, fileOutput)
-                self._metrics.process_filename(fileOutput)
+            if (_get_filename(fileInput) != FolderEncryptor.METADATA_FILE
+                    and fileInput != self._folderLocation and os.access(fileInput, os.W_OK)):
+                inputName = _get_filename(fileInput)
+                outputName = None
+                if self._encryptFiles:
+                    outputName = self._process_encrypt_filename(fileInput, inputName)
+                else:
+                    outputName = self._process_decrypt_filename(fileInput, inputName)
+                if outputName:
+                    fileOutput = os.path.join(_get_parent(fileInput), outputName)
+                    os.rename(fileInput, fileOutput)
+                    self._metrics.process_filename(fileOutput)
         except Exception:
             logging.error('Failed to process filename: ' + fileInput)
 

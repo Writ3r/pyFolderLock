@@ -49,11 +49,13 @@ def _get_parent(filepath):
 def main():
     '''
     Takes input for password + folder(s)
-    Ex.  pyLockRun.py TEST123 E:/testtttt/testFolder "E:/testtttt/Everything Needed"
-    Ex.  pyLockRun.py TEST123 "E:/testtttt/Everything Needed"
-    Ex.  pyLockRun.py --pwdfile E:/testtttt/pwd.txt E:/testtttt/testFolder
+    Ex.  pyFolderLockCmd.py TEST123 E:/testtttt/testFolder "E:/testtttt/Everything Needed"
+    Ex.  pyFolderLockCmd.py TEST123 "E:/testtttt/Everything Needed"
+    Ex.  pyFolderLockCmd.py --pwdfile E:/testtttt/pwd.txt E:/testtttt/testFolder
     Things to do:
         - handle single file case?
+        - save unique paths, not filenames, scope filenames unique to dirs.
+        - Lock filecreation on dir?
         - implement pyinstaller?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
