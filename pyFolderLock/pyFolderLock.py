@@ -351,23 +351,64 @@ class _Metrics:
 # =================================================================
 
 
+class MultiFolderEncryptor:
+    """
+    Encrypts/Decrypts contents of the passed in folder
+        folders - list of folders. replaces 'folder' arg in FolderEncryptor
+        - rest of args are derived from FolderEncryptor
+    """
+    def __init__(self,
+                 folders,
+                 password,
+                 **kwargs):
+
+        # list of encrypters to run
+        self.folderEncryptors = []
+
+        # handle case of single folder, no list
+        if isinstance(folders, str):
+            folders = [folders]
+
+        # create folder encryptors for each folder
+        for folder in folders:
+            try:
+                folderEncryptor = FolderEncryptor(folder, password, **kwargs)
+                self.folderEncryptors.append(folderEncryptor)
+            except InvalidPasswordError:
+                logging.error("The password you entered is invalid for: " + folder)
+            except InvalidArgumentError as e:
+                logging.error(str(e.msg))
+
+    # Managing functions
+    # =================================================================
+
+    def run(self):
+        """ Executes the encrypt/decrypt processes on all folderEncryptors"""
+        for folderEncryptor in self.folderEncryptors:
+            try:
+                folderEncryptor.run()
+            except Exception:
+                logging.error("Failed to execute encrypt/decrypt on folder: [{0}]"
+                              .format(folderEncryptor.folderLocation))
+
+
 class FolderEncryptor:
     """
     Encrypts/Decrypts contents of the passed in folder
-        folderLocation - location to encrypt/decrypt all files inside
+        folder - location to encrypt/decrypt all files inside
         password - used for the encryption process
-        passwordFile - specifies if password arg is a file with pass inside
-        verifyPassword - checks if password is correct b4 decrypting
-        metricsEnabled - turms on/off metrics thread
-        maxThreads - number of threads to use.
-        memory - max memory to use. 0 or less calculates default.
-        memoryMultiplier - multiplier on the max memory
+        opt: passwordFile - specifies if password arg is a file with pass inside
+        opt: verifyPassword - checks if password is correct b4 decrypting
+        opt: metricsEnabled - turms on/off metrics thread
+        opt: maxThreads - number of threads to use.
+        opt: memory - max memory to use. 0 or less calculates default.
+        opt: memoryMultiplier - multiplier on the max memory
     """
     METADATA_FILE = '.encryption_context'
     TMP_FILE_EXT = '.tmp'
 
     def __init__(self,
-                 folderLocation,
+                 folder,
                  password,
                  passwordFile=False,
                  verifyPassword=False,
@@ -377,7 +418,7 @@ class FolderEncryptor:
                  memoryMultiplier=.75):
 
         # check arg validity
-        self._check_args(folderLocation,
+        self._check_args(folder,
                          password,
                          passwordFile,
                          verifyPassword,
@@ -387,9 +428,9 @@ class FolderEncryptor:
                          memoryMultiplier)
 
         # build folder specific vars
-        self._folderLocation = EXT_PATH + str(Path(folderLocation))
-        dirnames, filenames = _get_curr_names(self._folderLocation)
-        self._metadataFileLoc = os.path.join(self._folderLocation,
+        self.folderLocation = EXT_PATH + str(Path(os.path.abspath(folder)))
+        dirnames, filenames = _get_curr_names(self.folderLocation)
+        self._metadataFileLoc = os.path.join(self.folderLocation,
                                              FolderEncryptor.METADATA_FILE)
         self._encryptFiles = not(os.path.exists(self._metadataFileLoc))
 
@@ -397,7 +438,7 @@ class FolderEncryptor:
         self._threadExec = ThreadPoolExecutor(max_workers=maxThreads)
         self._fileCreation = _FileCreation(set(dirnames + filenames))
         self._datasource = _DataStore(self._metadataFileLoc)
-        self._metrics = _Metrics(self._folderLocation,
+        self._metrics = _Metrics(self.folderLocation,
                                  metricsEnabled,
                                  len(filenames),
                                  len(dirnames))
@@ -418,7 +459,8 @@ class FolderEncryptor:
     # =================================================================
 
     def run(self):
-        if os.path.isdir(self._folderLocation):
+        """ Executtes the encrypt/decrypt processes """
+        if os.path.isdir(self.folderLocation):
             self._process_folder()
 
     def _process_folder(self):
@@ -428,16 +470,17 @@ class FolderEncryptor:
         else:
             self._handle_encrypt_files()
             self._handle_encrypt_filenames()
-        self._datasource.save_store(not(self._encryptFiles))
+        self._datasource.save_store(not(self._encryptFiles)
+                                    or len(self._uuidToFilenameDict) == 0)
 
     def _handle_encrypt_files(self):
         self._metrics.start(self._metrics.print_state_files)
-        self._walk_encrypt_files(self._folderLocation)
+        self._walk_encrypt_files(self.folderLocation)
         self._metrics.stop()
 
     def _handle_encrypt_filenames(self):
         self._metrics.start(self._metrics.print_state_filenames)
-        self._walk_encrypt_names(self._folderLocation)
+        self._walk_encrypt_names(self.folderLocation)
         self._metrics.stop()
 
     # Recursively walk directories
@@ -477,15 +520,17 @@ class FolderEncryptor:
             logging.error('Failed to process file: ' + fileInput)
 
     def _process_encrypt_file(self, fileInput, tmpFilename):
+        encType = encrypt_file(fileInput,
+                               tmpFilename,
+                               self._password,
+                               self._fileBufferSize)
         fileInputEnc = fileInput + ENCRYPTED_EXT
         os.rename(fileInput, fileInputEnc)
-        self._fileToEncTypeDict[fileInputEnc] = encrypt_file(fileInputEnc,
-                                                             tmpFilename,
-                                                             self._password,
-                                                             self._fileBufferSize)
+        self._fileToEncTypeDict[fileInputEnc] = encType
 
     def _process_decrypt_file(self, fileInput, tmpFilename):
-        if fileInput[-len(ENCRYPTED_EXT):] == ENCRYPTED_EXT:
+        if (fileInput[-len(ENCRYPTED_EXT):] == ENCRYPTED_EXT
+                and fileInput in self._fileToEncTypeDict):
             decrypt_file(fileInput,
                          tmpFilename,
                          self._password,
@@ -499,7 +544,7 @@ class FolderEncryptor:
     def _process_file_name(self, fileInput):
         try:
             if (_get_filename(fileInput) != FolderEncryptor.METADATA_FILE
-                    and fileInput != self._folderLocation and os.access(fileInput, os.W_OK)):
+                    and fileInput != self.folderLocation and os.access(fileInput, os.W_OK)):
                 inputName = _get_filename(fileInput)
                 outputName = None
                 if self._encryptFiles:

@@ -7,7 +7,7 @@ import argparse
 import multiprocessing
 
 from pathlib import Path
-from pyFolderLock import FolderEncryptor, InvalidPasswordError, InvalidArgumentError
+from pyFolderLock import MultiFolderEncryptor, InvalidPasswordError, InvalidArgumentError
 
 # ================================================================
 #
@@ -54,8 +54,7 @@ def main():
     Ex.  pyFolderLockCmd.py --pwdfile E:/testtttt/pwd.txt E:/testtttt/testFolder
     Things to do:
         - handle single file case?
-        - save unique paths, not filenames, scope filenames unique to dirs.
-        - Lock filecreation on dir?
+        - test multi file case
         - implement pyinstaller?
     '''
     parser = argparse.ArgumentParser(description='Encrypts folder contents with provided password.')
@@ -126,21 +125,14 @@ def main():
     # logging setup
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-    # run encrypt/decrypt on all folders
-    for folder in args.folders:
-        try:
-            folderEncrypter = FolderEncryptor(os.path.abspath(folder),
-                                              args.password,
-                                              passwordFile=args.pwdfile,
-                                              verifyPassword=args.verify,
-                                              maxThreads=args.threads,
-                                              memory=args.memory,
-                                              metricsEnabled=not(args.disableMetrics))
-            folderEncrypter.run()
-        except InvalidPasswordError:
-            logging.error("The password you entered is invalid for: " + folder)
-        except InvalidArgumentError as e:
-            logging.error(str(e.msg))
+    # run
+    MultiFolderEncryptor(args.folders,
+                         args.password,
+                         passwordFile=args.pwdfile,
+                         verifyPassword=args.verify,
+                         maxThreads=args.threads,
+                         memory=args.memory,
+                         metricsEnabled=not(args.disableMetrics)).run()
 
 
 if __name__ == '__main__':

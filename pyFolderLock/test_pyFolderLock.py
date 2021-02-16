@@ -6,7 +6,8 @@ import inspect
 import shutil
 
 from pathlib import Path
-from pyFolderLock import FolderEncryptor, InvalidPasswordError, InvalidArgumentError
+from pyFolderLock import FolderEncryptor, MultiFolderEncryptor
+from pyFolderLock import InvalidPasswordError, InvalidArgumentError
 
 
 # Utilities
@@ -36,15 +37,24 @@ def _get_parent(filepath):
 
 
 class TestPyFolderLock(unittest.TestCase):
+
     WORKING_DIR = _get_parent(inspect.getfile(inspect.currentframe()))
-    TEST_DIR = os.path.join(WORKING_DIR, 'TEST_DATA')
+    TEST_WORKING_FOLDER = os.path.join(WORKING_DIR, 'TEST_WORKING_FOLDER')
+    PASSWORD_FILE = os.path.join(TEST_WORKING_FOLDER, 'PASSWORDTEST.txt')
+    TEST_ENCRYPT_FOLDER = os.path.join(TEST_WORKING_FOLDER, 'TEST_ENC_FOLDER')
+
+    TEST_DIR = os.path.join(TEST_ENCRYPT_FOLDER, 'TEST_DATA')
+    TEST_DIR2 = os.path.join(TEST_ENCRYPT_FOLDER, 'TEST_DATA2')
+
     TEST_FOLDER_LIST = [
         os.path.join(TEST_DIR, 'TESTFOL1'),
         os.path.join(TEST_DIR, 'TESTFOL1', 'TESTFOL2'),
         os.path.join(TEST_DIR, 'TESTFOL1', 'TESTFOL2', 'TESTFOL3'),
         os.path.join(TEST_DIR, 'TESTFOL1', 'TESTFOL2', 'TESTFOL3', 'TESTFOL4'),
         os.path.join(TEST_DIR, 'TESTFOL5'),
-        os.path.join(TEST_DIR, 'TESTFOL6'),
+        os.path.join(TEST_DIR2, 'TESTFOL1'),
+        os.path.join(TEST_DIR2, 'TESTFOL1', 'TESTFOL2'),
+        os.path.join(TEST_DIR2, 'TESTFOL1', 'TESTFOL2', 'TESTFOL3'),
     ]
     TEST_FILE_MAP = {
         'TEST1.txt': 'I AM ENC1',
@@ -53,13 +63,15 @@ class TestPyFolderLock(unittest.TestCase):
         'TEST4.txt': 'I AM ENC4',
         'TEST5.txt': 'I AM ENC5',
     }
-    PASSWORD_FILE = os.path.join(WORKING_DIR, 'PASSWORDTEST.txt')
 
     def setUp(self):
         # destroy any possible files
         self.tearDown()
         # create basic test folder
+        os.mkdir(TestPyFolderLock.TEST_WORKING_FOLDER)
+        os.mkdir(TestPyFolderLock.TEST_ENCRYPT_FOLDER)
         os.mkdir(TestPyFolderLock.TEST_DIR)
+        os.mkdir(TestPyFolderLock.TEST_DIR2)
         for folder in TestPyFolderLock.TEST_FOLDER_LIST:
             os.mkdir(folder)
             for key in TestPyFolderLock.TEST_FILE_MAP:
@@ -68,10 +80,8 @@ class TestPyFolderLock(unittest.TestCase):
                             "w")
 
     def tearDown(self):
-        if os.path.exists(TestPyFolderLock.TEST_DIR):
-            shutil.rmtree(TestPyFolderLock.TEST_DIR)
-        if os.path.exists(TestPyFolderLock.PASSWORD_FILE):
-            os.remove(TestPyFolderLock.PASSWORD_FILE)
+        if os.path.exists(TestPyFolderLock.TEST_WORKING_FOLDER):
+            shutil.rmtree(TestPyFolderLock.TEST_WORKING_FOLDER)
 
     def test_00_encrypt_byte_basic(self):
         # encrypt
@@ -86,6 +96,18 @@ class TestPyFolderLock(unittest.TestCase):
         FolderEncryptor(TestPyFolderLock.TEST_DIR, "PASSWORD111").run()
         # check that all files/dirs are back to normal
         self.check_dirs_normal()
+
+    def test_00_multi_folders(self):
+        # encrypt
+        MultiFolderEncryptor([TestPyFolderLock.TEST_DIR, TestPyFolderLock.TEST_DIR2],
+                             "PASSWORD111").run()
+        # check that all files/dirs are not normal
+        self.check_dirs_not_normal(multi=True)
+        # decrypt
+        MultiFolderEncryptor([TestPyFolderLock.TEST_DIR, TestPyFolderLock.TEST_DIR2],
+                             "PASSWORD111").run()
+        # check that all files/dirs are normal
+        self.check_dirs_normal(multi=True)
 
     def test_02_pwdFile(self):
         # write password file
@@ -108,7 +130,7 @@ class TestPyFolderLock(unittest.TestCase):
 
     def test_03_decrypt_pwdVerify(self):
         # encrypt
-        FolderEncryptor(TestPyFolderLock.TEST_DIR, 
+        FolderEncryptor(TestPyFolderLock.TEST_DIR,
                         "PASSWORD1113",
                         verifyPassword=True).run()
         # decrypt
@@ -216,25 +238,34 @@ class TestPyFolderLock(unittest.TestCase):
         # check normal
         self.assertTrue(os.path.exists(largeFile))
 
-    def check_dirs_normal(self):
-        # check that all files/dirs are back to normal
-        for root, dirs, files in os.walk(TestPyFolderLock.TEST_DIR):
-            for folder in dirs:
-                self.assertTrue('TEST' in folder)
-            for filee in files:
-                self.assertTrue('TEST' in filee)
-                self.assertTrue('I AM' in _read_file(os.path.join(root, filee), "r+"))
+    def check_dirs_normal(self, multi=False):
+        """check that all files/dirs are back to normal"""
+        folders = [TestPyFolderLock.TEST_DIR]
+        if multi:
+            folders.append(TestPyFolderLock.TEST_DIR2)
+        for folderTest in folders:
+            for root, dirs, files in os.walk(folderTest):
+                for folder in dirs:
+                    self.assertTrue('TEST' in folder)
+                for filee in files:
+                    self.assertTrue('TEST' in filee)
+                    self.assertTrue('I AM' in _read_file(os.path.join(root, filee), "r+"))
 
-    def check_dirs_not_normal(self):
-        for root, dirs, files in os.walk(TestPyFolderLock.TEST_DIR):
-            for folder in dirs:
-                self.assertFalse('TEST' in folder)
-            for filee in files:
-                self.assertFalse('TEST' in filee)
-                try:
-                    self.assertFalse('I AM' in _read_file(os.path.join(root, filee), "r+"))
-                except Exception:
-                    pass
+    def check_dirs_not_normal(self, multi=False):
+        """check that all files/dirs are different"""
+        folders = [TestPyFolderLock.TEST_DIR]
+        if multi:
+            folders.append(TestPyFolderLock.TEST_DIR2)
+        for folderTest in folders:
+            for root, dirs, files in os.walk(folderTest):
+                for folder in dirs:
+                    self.assertFalse('TEST' in folder)
+                for filee in files:
+                    self.assertFalse('TEST' in filee)
+                    try:
+                        self.assertFalse('I AM' in _read_file(os.path.join(root, filee), "r+"))
+                    except Exception:
+                        pass
 
 
 if __name__ == '__main__':
