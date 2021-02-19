@@ -10,4 +10,4 @@ Wrote all the code on windows, but the code should be OS independent. Let me kno
 
 ## Ways to use
 - import pyFolderLock's FolderEncryptor or MultiFolderEncryptor, build the object, and run it.
-- call the [project cmd interface file](https://github.com/Writ3r/pyFolderLock/blob/main/pyFolderLock/pyFolderLockCli.py) with stated args
+- call the [project cli interface file](https://github.com/Writ3r/pyFolderLock/blob/main/pyFolderLock/pyFolderLockCli.py) with stated args
