@@ -4,10 +4,13 @@ Recursively encrypts files in folders. Useful for keeping vital information safe
 ## Supported OS
 Wrote all the code on windows, but the code should be OS independent. Let me know if it fails to run in linux.
 
-## Installation
-1. Make sure your environment has the necessary pip installs inside requirements.txt
-2. Add [project folder](https://github.com/Writ3r/pyFolderLock/tree/main/pyFolderLock) to your PYTHONPATH
+## Setup
+- Make sure your environment has the necessary pip installs inside requirements.txt
+- If you are importing the objects into your python modules, make sure this module is on your python path.
 
 ## Ways to use
-- import pyFolderLock's FolderEncryptor, build the object, and run it.
-- call the [project cmd interface file](https://github.com/Writ3r/pyFolderLock/blob/main/bin/pyFolderLockCmd.py) with stated args
+- import pyFolderLock's FolderEncryptor or MultiFolderEncryptor, build the object, and run it.
+- call the [project cli file](https://github.com/Writ3r/pyFolderLock/blob/main/pyFolderLock/pyFolderLockCli.py) with stated args
+
+## License
+This is released under an MIT license. See the [LICENSE](https://github.com/Writ3r/pyFolderLock/blob/main/LICENSE.txt) file in this repository for more information.
