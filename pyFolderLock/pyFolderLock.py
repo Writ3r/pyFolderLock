@@ -5,7 +5,6 @@ import os
 import base64
 import joblib
 import threading
-import pyAesCrypt
 import multiprocessing
 import psutil
 import logging
@@ -24,12 +23,12 @@ from Crypto import Random
 #
 # ================================================================
 
-VERSION = '1.0.0'
-METHOD_BYTE_ENCRYPTION = 'BYTE_ENCRYPTION'
-METHOD_STREAM_ENCRYPTION = 'STREAM_ENCRYPTION'
+
+VERSION = '1.0.1'
 ENCRYPTED_EXT = '.locked'
 EXT_PATH = '\\\\?\\' if os.name == 'nt' else ''
 MAX_PASS_LENGTH = 1024
+
 
 # ================================================================
 #
@@ -37,73 +36,199 @@ MAX_PASS_LENGTH = 1024
 #
 # ================================================================
 
-
-def _determine_encrypt_method(filename, bufferSize):
-    filesizeBytes = os.path.getsize(filename)
-    if filesizeBytes < bufferSize:
-        return METHOD_BYTE_ENCRYPTION
-    return METHOD_STREAM_ENCRYPTION
+# Primary functions
+# =================================================================
 
 
 def encrypt_file(filename, tmpFilename, password, bufferSize):
     """
-    Encrypts files via a stream or via content based on size
+    Encrypts files. If file exceeds buffersize, will stream it.
+    CBC mode, including PKCS#7 padding
     """
-    encryptionType = _determine_encrypt_method(filename, bufferSize)
-    if encryptionType == METHOD_STREAM_ENCRYPTION:
-        pyAesCrypt.encryptFile(filename, tmpFilename, password, bufferSize)
+    if _should_stream_file(filename, bufferSize):
+        _encrypt_file_streaming(filename, tmpFilename, str.encode(password), bufferSize)
         os.replace(tmpFilename, filename)
     else:
-        output = encrypt_bytes(str.encode(password), _read_file(filename),
-                               encode=False)
-        _write_file(filename, output)
-    return encryptionType
-
-
-def decrypt_file(filename, tmpFilename, password, bufferSize, encryptionType):
-    """
-    Decrypts files via a stream or via content based on previous type
-    """
-    if encryptionType == METHOD_STREAM_ENCRYPTION:
-        pyAesCrypt.decryptFile(filename, tmpFilename, password, bufferSize)
-        os.replace(tmpFilename, filename)
-    else:
-        output = decrypt_bytes(str.encode(password),
-                               _read_file(filename),
-                               decode=False)
+        output = encrypt_bytes(str.encode(password), _read_file(filename))
         _write_file(filename, output)
 
 
-def encrypt_bytes(key, source, encode=True):
+def decrypt_file(filename, tmpFilename, password, bufferSize):
     """
-    Encrypts bytes (used for things like strings/small files)
-    https://stackoverflow.com/a/44212550/11381698
+    Decrypts files. If file exceeds buffersize, will stream it.
+    CBC mode, including PKCS#7 padding
     """
+    if _should_stream_file(filename, bufferSize):
+        _decrypt_file_streaming(filename, tmpFilename, str.encode(password), bufferSize)
+        os.replace(tmpFilename, filename)
+    else:
+        output = decrypt_bytes(str.encode(password), _read_file(filename))
+        _write_file(filename, output)
+
+
+def encrypt_bytes(key, source):
+    """
+    Encrypts pure bytes (used for small sources)
+    CBC mode, including PKCS#7 padding
+    """
+    encryptor, IV = _build_encryptor(key)
+    byteOutput = IV
+    byteOutput += _encrypt_chunk(source, encryptor, True)
+    return byteOutput
+
+
+def decrypt_bytes(key, source):
+    """
+    Decrypts pure bytes (used for small sources)
+    CBC mode, including PKCS#7 padding
+    """
+    IV = source[:AES.block_size]
+    decryptor = _build_decryptor(key, IV)
+    source = source[AES.block_size:]
+    data = _decrypt_chunk(source, decryptor, True)
+    return data
+
+
+# Helper functions
+# =================================================================
+
+# process file streams
+# =============
+
+
+def _encrypt_file_streaming(infile, outfile, key, bufferSize):
+    if os.path.isfile(outfile) and os.path.samefile(infile, outfile):
+        raise ValueError("Input and output files are the same.")
+    try:
+        with open(infile, "rb") as fIn:
+            try:
+                with open(outfile, "wb") as fOut:
+
+                    # setup encryptor
+                    encryptor, IV = _build_encryptor(key)
+                    fOut.write(IV)
+
+                    # loop file
+                    keepRunning = True
+                    while keepRunning:
+
+                        # try to read bufferSize bytes
+                        fdata = fIn.read(bufferSize)
+
+                        # check if EOF was reached
+                        if len(fdata) < bufferSize:
+                            keepRunning = False
+
+                        # encrypt
+                        cText = _encrypt_chunk(fdata, encryptor, not(keepRunning))
+
+                        # write encrypted file content
+                        fOut.write(cText)
+
+            except IOError:
+                raise ValueError("Unable to write output file.")
+    except IOError:
+        raise ValueError("Unable to read input file.")
+
+
+def _decrypt_file_streaming(infile, outfile, key, bufferSize):
+    if os.path.isfile(outfile) and os.path.samefile(infile, outfile):
+        raise ValueError("Input and output files are the same.")
+    try:
+        with open(infile, "rb") as fIn:
+            try:
+                with open(outfile, "wb") as fOut:
+
+                    # setup decryptor
+                    IVData = fIn.read(AES.block_size)
+                    IV = IVData[:AES.block_size]
+                    decryptor = _build_decryptor(key, IV)
+
+                    # loop file
+                    fileSize = os.stat(infile).st_size
+                    keepRunning = True
+                    while keepRunning:
+
+                        # try to read bufferSize bytes
+                        fdata = fIn.read(bufferSize)
+
+                        # check if end of file
+                        posInStream = fIn.tell()
+                        if posInStream == fileSize:
+                            keepRunning = False
+                        elif posInStream > fileSize:
+                            os.remove(outfile)
+                            raise ValueError("File input length has grown?")
+
+                        # decrypt
+                        cText = _decrypt_chunk(fdata, decryptor, not(keepRunning))
+
+                        # write decrypted file content
+                        fOut.write(cText)
+
+            except IOError:
+                raise ValueError("Unable to write output file.")
+    except IOError:
+        raise ValueError("Unable to read input file.")
+
+
+# process bytes
+# =============
+
+
+def _encrypt_chunk(inBytes, encryptor, fileEnd):
+    # pad if needed
+    if fileEnd:
+        padding = AES.block_size - len(inBytes) % AES.block_size
+        inBytes += bytes([padding])*padding
+
+    # encrypt data
+    cText = encryptor.encrypt(inBytes)
+
+    # encrypted text
+    return cText
+
+
+def _decrypt_chunk(inBytes, decryptor, fileEnd):
+    # decrypt text
+    cText = decryptor.decrypt(inBytes)
+
+    # remove pad if needed
+    if fileEnd:
+        padding = cText[-1]
+        if cText[-padding:] != bytes([padding]) * padding:
+            raise ValueError("Invalid padding...")
+        cText = cText[:-padding]
+
+    # return decrpyted text
+    return cText
+
+
+# builders
+# =============
+
+
+def _build_encryptor(key):
     key = SHA256.new(key).digest()
     IV = Random.new().read(AES.block_size)
     encryptor = AES.new(key, AES.MODE_CBC, IV)
-    padding = AES.block_size - len(source) % AES.block_size
-    source += bytes([padding]) * padding
-    data = IV + encryptor.encrypt(source)
-    return base64.b64encode(data).decode("latin-1") if encode else data
+    return encryptor, IV
 
 
-def decrypt_bytes(key, source, decode=True):
-    """
-    Decrypts bytes (used for things like strings/small files)
-    https://stackoverflow.com/a/44212550/11381698
-    """
-    if decode:
-        source = base64.b64decode(source.encode("latin-1"))
+def _build_decryptor(key, IV):
     key = SHA256.new(key).digest()
-    IV = source[:AES.block_size]
     decryptor = AES.new(key, AES.MODE_CBC, IV)
-    data = decryptor.decrypt(source[AES.block_size:])
-    padding = data[-1]
-    if data[-padding:] != bytes([padding]) * padding:
-        raise ValueError("Invalid padding...")
-    return data[:-padding]
+    return decryptor
 
+
+# determinator
+# =============
+
+def _should_stream_file(filename, bufferSize):
+    filesizeBytes = os.path.getsize(filename)
+    if filesizeBytes < bufferSize:
+        return False
+    return True
 
 # ================================================================
 #
@@ -229,11 +354,9 @@ class _DataStore:
     Stores data about the encryption inside a metadata file
     """
     UUID_TO_FILENAME_KEY = "UUID_TO_FILENAME"
-    FNAME_TO_ENC_TYPE_KEY = "FILENAME_TO_ENCRYPTION_TYPE"
     PASSWORD_VERIFIER_KEY = "PASSWORD_VERIFIER"
 
     KEY_TO_STORE = {UUID_TO_FILENAME_KEY: {},
-                    FNAME_TO_ENC_TYPE_KEY: {},
                     PASSWORD_VERIFIER_KEY: PASSWORD_VERIFIER_KEY}
 
     def __init__(self, filepath):
@@ -450,7 +573,6 @@ class FolderEncryptor:
 
         # dependent vars
         self._uuidToFilenameDict = self._datasource.get_value(_DataStore.UUID_TO_FILENAME_KEY)
-        self._fileToEncTypeDict = self._datasource.get_value(_DataStore.FNAME_TO_ENC_TYPE_KEY)
         self._fileBufferSize = self._calc_default_buffer(maxThreads,
                                                          memory,
                                                          memoryMultiplier=memoryMultiplier)
@@ -520,22 +642,19 @@ class FolderEncryptor:
             logging.error('Failed to process file: ' + fileInput)
 
     def _process_encrypt_file(self, fileInput, tmpFilename):
-        encType = encrypt_file(fileInput,
-                               tmpFilename,
-                               self._password,
-                               self._fileBufferSize)
+        encrypt_file(fileInput,
+                     tmpFilename,
+                     self._password,
+                     self._fileBufferSize)
         fileInputEnc = fileInput + ENCRYPTED_EXT
         os.rename(fileInput, fileInputEnc)
-        self._fileToEncTypeDict[fileInputEnc] = encType
 
     def _process_decrypt_file(self, fileInput, tmpFilename):
-        if (fileInput[-len(ENCRYPTED_EXT):] == ENCRYPTED_EXT
-                and fileInput in self._fileToEncTypeDict):
+        if (fileInput[-len(ENCRYPTED_EXT):] == ENCRYPTED_EXT):
             decrypt_file(fileInput,
                          tmpFilename,
                          self._password,
-                         self._fileBufferSize,
-                         self._fileToEncTypeDict[fileInput])
+                         self._fileBufferSize)
             os.rename(fileInput, fileInput[:-len(ENCRYPTED_EXT)])
 
     # Encrypt/Decrypt filenames
@@ -561,14 +680,13 @@ class FolderEncryptor:
     def _process_encrypt_filename(self, fileInput, inputName):
         outputName = self._fileCreation.get_filename()
         self._uuidToFilenameDict[outputName] = encrypt_bytes(str.encode(self._password),
-                                                             str.encode(inputName),
-                                                             False)
+                                                             str.encode(inputName))
         return outputName
 
     def _process_decrypt_filename(self, fileInput, inputName):
         if inputName in self._uuidToFilenameDict:
-            uuidFilename = self._uuidToFilenameDict[inputName]
-            outputName = decrypt_bytes(str.encode(self._password), uuidFilename, False).decode()
+            encFilename = self._uuidToFilenameDict[inputName]
+            outputName = decrypt_bytes(str.encode(self._password), encFilename).decode()
             return outputName
 
     # Password Verification
@@ -582,16 +700,14 @@ class FolderEncryptor:
 
     def _handle_verify_pwd_encrypt(self, password):
         encryptedPassword = encrypt_bytes(str.encode(self._password),
-                                          str.encode(_DataStore.PASSWORD_VERIFIER_KEY),
-                                          False)
+                                          str.encode(_DataStore.PASSWORD_VERIFIER_KEY))
         self._datasource.save_value(_DataStore.PASSWORD_VERIFIER_KEY, encryptedPassword)
 
     def _handle_verify_pwd_decrypt(self, password):
         try:
             encryptedPassword = self._datasource.get_value(_DataStore.PASSWORD_VERIFIER_KEY)
             decryptedPasswordEnc = decrypt_bytes(str.encode(self._password),
-                                                 encryptedPassword,
-                                                 False)
+                                                 encryptedPassword)
             if decryptedPasswordEnc.decode() == _DataStore.PASSWORD_VERIFIER_KEY:
                 return None
         except Exception:
