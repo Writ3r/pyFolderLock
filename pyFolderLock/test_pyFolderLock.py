@@ -38,11 +38,10 @@ def _get_parent(filepath):
 
 class TestPyFolderLock(unittest.TestCase):
     """
-    ways to improve tests: 
+    ways to improve tests:
     - make json of files to build?
     - get hash of file on enc/decrypt and compare
     """
-
     WORKING_DIR = _get_parent(inspect.getfile(inspect.currentframe()))
     TEST_WORKING_FOLDER = os.path.join(WORKING_DIR, 'TEST_WORKING_FOLDER')
     PASSWORD_FILE = os.path.join(TEST_WORKING_FOLDER, 'PASSWORDTEST.txt')
